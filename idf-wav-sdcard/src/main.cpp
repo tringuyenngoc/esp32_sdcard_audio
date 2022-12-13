@@ -1,5 +1,6 @@
 #include "esp_err.h"
 #include "esp_log.h"
+#include "esp_pm.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -13,6 +14,8 @@
 #include "WAVFileReader.h"
 #include "config.h"
 
+//#define SDCARD_WRITING_ENABLED  1
+
 static const char *TAG = "app";
 
 extern "C"
@@ -22,7 +25,7 @@ extern "C"
 
 void wait_for_button_push()
 {
-  while (gpio_get_level(GPIO_BUTTON) == 0)
+  while (gpio_get_level(GPIO_BUTTON) == 1)
   {
     vTaskDelay(pdMS_TO_TICKS(100));
   }
@@ -30,28 +33,38 @@ void wait_for_button_push()
 
 void record(I2SSampler *input, const char *fname)
 {
-  int16_t *samples = (int16_t *)malloc(sizeof(int16_t) * 1024);
+  int16_t *samples = (int16_t *)malloc(sizeof(int16_t) * 2048);
   ESP_LOGI(TAG, "Start recording");
   input->start();
+#ifdef SDCARD_WRITING_ENABLED
   // open the file on the sdcard
   FILE *fp = fopen(fname, "wb");
   // create a new wave file writer
   WAVFileWriter *writer = new WAVFileWriter(fp, input->sample_rate());
+#endif
   // keep writing until the user releases the button
-  while (gpio_get_level(GPIO_BUTTON) == 1)
+  while (1)
   {
-    int samples_read = input->read(samples, 1024);
-    int64_t start = esp_timer_get_time();
+    int samples_read = input->read(samples, 2048);
+    // int64_t start = esp_timer_get_time();
+#ifdef SDCARD_WRITING_ENABLED
     writer->write(samples, samples_read);
-    int64_t end = esp_timer_get_time();
-    ESP_LOGI(TAG, "Wrote %d samples in %lld microseconds", samples_read, end - start);
+#endif
+    // int64_t end = esp_timer_get_time();
+    // ESP_LOGI(TAG, "Wrote %d samples in %lld microseconds", samples_read, end - start);
+
+    if (gpio_get_level(GPIO_BUTTON) == 0) {
+      break;
+    }
   }
   // stop the input
   input->stop();
+#ifdef SDCARD_WRITING_ENABLED
   // and finish the writing
   writer->finish();
   fclose(fp);
   delete writer;
+#endif
   free(samples);
   ESP_LOGI(TAG, "Finished recording");
 }
@@ -104,10 +117,25 @@ void app_main(void)
 #else
   I2SSampler *input = new ADCSampler(ADC_UNIT_1, ADC1_CHANNEL_7, i2s_adc_config);
 #endif
-  I2SOutput *output = new I2SOutput(I2S_NUM_0, i2s_speaker_pins);
+  // I2SOutput *output = new I2SOutput(I2S_NUM_0, i2s_speaker_pins);
 
   gpio_set_direction(GPIO_BUTTON, GPIO_MODE_INPUT);
-  gpio_set_pull_mode(GPIO_BUTTON, GPIO_PULLDOWN_ONLY);
+  gpio_set_pull_mode(GPIO_BUTTON, GPIO_PULLUP_ONLY);
+  gpio_sleep_sel_dis(GPIO_BUTTON);
+  gpio_sleep_sel_dis(PIN_NUM_MISO);
+  gpio_sleep_sel_dis(PIN_NUM_CLK);
+  gpio_sleep_sel_dis(PIN_NUM_MOSI);
+  gpio_sleep_sel_dis(PIN_NUM_CS);
+  gpio_sleep_sel_dis(I2S_MIC_SERIAL_CLOCK);
+  gpio_sleep_sel_dis(I2S_MIC_LEFT_RIGHT_CLOCK);
+  gpio_sleep_sel_dis(I2S_MIC_SERIAL_DATA);
+
+    esp_pm_config_esp32_t cfg = {
+        .max_freq_mhz = 80,
+        .min_freq_mhz = 10,
+        .light_sleep_enable = true
+    };
+    esp_pm_configure(&cfg);
 
   while (true)
   {
@@ -115,8 +143,8 @@ void app_main(void)
     wait_for_button_push();
     record(input, "/sdcard/test.wav");
     // wait for the user to push the button again
-    wait_for_button_push();
-    play(output, "/sdcard/test.wav");
+    // wait_for_button_push();
+    // play(output, "/sdcard/test.wav");
     vTaskDelay(pdMS_TO_TICKS(1000));
   }
 }
