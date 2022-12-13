@@ -35,7 +35,7 @@ SDCard::SDCard(const char *mount_point, gpio_num_t miso, gpio_num_t mosi, gpio_n
       .sclk_io_num = clk,
       .quadwp_io_num = -1,
       .quadhd_io_num = -1,
-      .max_transfer_sz = 4000,
+      .max_transfer_sz = 4000*4,
       .flags = 0,
       .intr_flags = 0};
   ret = spi_bus_initialize(spi_host_device_t(m_host.slot), &bus_cfg, SPI_DMA_CHAN);
@@ -50,6 +50,7 @@ SDCard::SDCard(const char *mount_point, gpio_num_t miso, gpio_num_t mosi, gpio_n
   sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
   slot_config.gpio_cs = cs;
   slot_config.host_id = spi_host_device_t(m_host.slot);
+  m_host.max_freq_khz = 18000;
 
   ret = esp_vfs_fat_sdspi_mount(m_mount_point.c_str(), &m_host, &slot_config, &mount_config, &m_card);
 
