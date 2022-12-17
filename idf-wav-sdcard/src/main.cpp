@@ -14,9 +14,10 @@
 #include "WAVFileReader.h"
 #include "config.h"
 
-//#define SDCARD_WRITING_ENABLED  1
+#define SDCARD_WRITING_ENABLED  1
+#define SDCARD_BUFFER           50*1024
 
-static const char *TAG = "app";
+static const char *TAG = "main";
 
 extern "C"
 {
@@ -33,7 +34,12 @@ void wait_for_button_push()
 
 void record(I2SSampler *input, const char *fname)
 {
-  int16_t *samples = (int16_t *)malloc(sizeof(int16_t) * 2048);
+  uint32_t idx = 0;
+  int16_t *samples = (int16_t *)malloc(sizeof(int16_t) * SDCARD_BUFFER);
+  if (samples == NULL) {
+    ESP_LOGI(TAG, "Cannot allocate buffer");
+    return;
+  }
   ESP_LOGI(TAG, "Start recording");
   input->start();
 #ifdef SDCARD_WRITING_ENABLED
@@ -45,15 +51,22 @@ void record(I2SSampler *input, const char *fname)
   // keep writing until the user releases the button
   while (1)
   {
-    int samples_read = input->read(samples, 2048);
+    int samples_read = input->read(&samples[idx], 1024);
+    idx += 1024;
     // int64_t start = esp_timer_get_time();
 #ifdef SDCARD_WRITING_ENABLED
-    writer->write(samples, samples_read);
+    if (idx == (SDCARD_BUFFER)) {
+      writer->write(samples, idx);
+      idx = 0;
+    }
 #endif
     // int64_t end = esp_timer_get_time();
     // ESP_LOGI(TAG, "Wrote %d samples in %lld microseconds", samples_read, end - start);
 
     if (gpio_get_level(GPIO_BUTTON) == 0) {
+#ifdef SDCARD_WRITING_ENABLED
+      writer->write(samples, idx);
+#endif
       break;
     }
   }
